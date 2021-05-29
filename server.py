@@ -1,56 +1,80 @@
+# encoding=utf-8
 import socket
+import json
+import base64
+import csv
 import random
 
+from common_comm import send_dict, recv_dict, sendrecv_dict
+from Crypto.Cipher import AES
 
-s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-s.bind(("127.0.0.1",9000))
-s.listen(5)
+def main ():
+    tcp_s = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
+    tcp_s.bind (("127.0.0.2", 1244))
 
-(c,a) = s.accept()
-print ("Received connection from", a)
+    tcp_s.listen ()
 
-Hello=c.recv(10000).decode()
+    # aceitar novos clientes
+    client_s, client_addr = tcp_s.accept ()
+    
+    request = recv_dict (client_s)
+    cipherkey = base64.b64decode (request['cipher'])
+    cipher = AES.new (cipherkey, AES.MODE_ECB)
+    
+    #a um número aleatório entre 0 e 100
+    secret_number = random.randint(0, 100) 
+    #um número máximo aleatório de jogadas entre 10 e 30
+    max_trys = random.randint(10,30)
 
-print(Hello)
+    msg = "Name:"
+    send_dict(client_s,msg)
 
-greetings="Greetings!"
-c.send((greetings+"\r\n").encode())
+    request = recv_dict (client_s)
+    user = base64.b64decode (request['client_id'])
+    user = cipher.decrypt (user)
+    user = (str (user, 'utf8'))
 
-game=c.recv(10000).decode()
-print (game)
+    with open('report.csv', 'r', newline='') as file:
+        nuser = 0
+        for x in file:
+            if user in x:
+                nuser += 1
+        if nuser>0:
+            print("User Already in the System!")
+            response = { "op" : "START",
+                        "status" : False,
+                        "error": "Cliente existente"
+            }
+            response = send_dict(client_s, response)
+        else:
+            with open('report.csv', 'a',newline='') as f:
+                f.write("\nUser: "+str(user)+", Max Trys: "+str(max_trys))
+                max_tryss = cipher.encrypt (bytes("%16d" % (max_trys), 'utf8'))
+                max_trys_tosend = str (base64.b64encode (max_tryss), 'utf8')
+                response = { 'op': "START",
+                            "status": True,
+                            "max_attempts": max_trys_tosend,
+                            }
+                response = send_dict (client_s, response)
 
-ready="Ready For The Guess Game!"
-c.send((ready+"\r\n").encode())
+    # { "op": "START", "status": False, "error": "Cliente existente" }
+   # { "op": "START", "status": True, "max_attempts": nº máximo de jogadas }
 
-random_number = random.randint(1, 20)
+    while 1:
+        request = recv_dict (client_s)
+        data = base64.b64decode (request['value'])
+        data = cipher.decrypt (data)
+        data = int (str (data, 'utf8'))
+        print ("SERVER - Valor Recebido %d" % (data))
 
-running = 1
+        data = data * 10
 
-while running:
-    guess=c.recv(10000).decode()
-    guess=int(guess)
-    print(guess)
+        print ("SERVER - Valor Enviado %d" % (data))
+        data = cipher.encrypt (bytes("%16d" % (data), 'utf8'))
+        data_tosend = str (base64.b64encode (data), 'utf8')
+        response = { 'value': data_tosend }
+        response = send_dict (client_s, response)
 
-    if guess <= random_number - 3:
-
-        far_message="Far!"
-        c.send((far_message+"\r\n").encode())
-
-    if guess >= random_number + 3:
-
-        far_message="Far!"
-        c.send((far_message+"\r\n").encode())
-
-    if guess == random_number - 2 or guess == random_number + 2 or guess == random_number + 1 or guess == random_number - 1:
-
-        close_message="close!"
-        c.send((close_message+"\r\n").encode())
-
-
-    if (guess==random_number):
-
-        correct_message="Correct!"
-        c.send((correct_message+"\r\n").encode())
-        running=0
-
-c.close()
+    client_s.close ()
+    tcp_s.close ()
+main ()

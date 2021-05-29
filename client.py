@@ -1,46 +1,65 @@
+# encoding=utf-8
+import os
 import socket
+import select
+import json
+import base64
 import random
-import csv
 
-s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-s.connect(('127.0.0.1',9000))
+from common_comm import send_dict, recv_dict, sendrecv_dict
+from Crypto.Cipher import AES
 
-Hello="Hello"
+def main():
+    tcp_s = socket.socket (socket.AF_INET, socket.SOCK_STREAM)
+    tcp_s.bind (("127.0.0.2", 0))
 
-s.send((Hello +"\r\n").encode())
+    # Ligar ao servidor
+    tcp_s.connect (("127.0.0.2", 1244))
 
-greetings=s.recv(10000).decode()
-print(greetings)
+    cipherkey = os.urandom(16)
+    cipherkey_tosend = str (base64.b64encode (cipherkey), 'utf8')
+    cipher = AES.new (cipherkey, AES.MODE_ECB)
 
-game = "Guess Game Please"
-s.send((game + "\r\n") .encode())
+    request = { 'op': 'START', 'cipher': cipherkey_tosend }
+    send_dict (tcp_s, request)
 
-game = s.recv(10000).decode()
-print(game)
+    name = recv_dict(tcp_s)
 
+    user = (input ("Name: "))
 
-running=1
-while running:
-    maxtrys = random.randint(10, 30)
-    print("Tem "+str(maxtrys)+" tentativas!")
-    trys=0
-    user = input("Insira o seu Nome:")
-    while(trys<maxtrys and running==1):
-        guess = input("\nEnter your guess: ")
-        s.send(guess.encode())
-        trys += 1
+    user = cipher.encrypt (bytes("%16s" % (user), 'utf8'))
+    user_tosend = str (base64.b64encode (user), 'utf8')
 
-        response = s.recv(10000).decode()
-        print(response)
+    request = { 'client_id': user_tosend }
+    response = send_dict(tcp_s, request)
 
-        if response.startswith("Correct"):
-            running = 0
+    # operação de registo deste cliente foi feita com sucesso e indicando-lhe quantas jogadas ele dispõe
+    response = sendrecv_dict (tcp_s, request)
+    print(response)
+    if response['status'] == True:
+        max_trys = base64.b64decode(response['max_attempts'])
+        max_trys = cipher.decrypt(max_trys)
+        max_trys = int (str (max_trys, 'utf-8'))
+
+        print("You have "+str(max_trys)+" trys\n")
     else:
-        if(trys>=maxtrys):
-            print("Excedeu o numero de tentativas!")
-            running = 0
+        tcp_s.shutdown(tcp_s)
+        tcp_s.close()
 
-with open('report.csv', 'a', newline='') as file:
-    file.write("\nUser: "+str(user)+", Trys: "+str(trys)+", Max Trys: "+str(maxtrys))
+    while 1:
+        data = int (input ("Valor: "))
+        print ("CLIENT - Valor Enviado %d" % (data))
+        data = cipher.encrypt (bytes("%16d" % (data), 'utf8'))
+        data_tosend = str (base64.b64encode (data), 'utf8')
 
-s.close()
+        request = { 'value': data_tosend }
+        response = sendrecv_dict (tcp_s, request)
+
+        data = base64.b64decode (response['value'])
+        data = cipher.decrypt (data)
+        data = int (str (data, 'utf-8'))
+        print ("CLIENT - Valor Recebido %d" % (data))
+
+    tcp_s.close()
+    
+main ()
