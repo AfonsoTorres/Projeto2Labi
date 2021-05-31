@@ -112,6 +112,7 @@ def main():
 
             response = recv_dict (tcp_s)
 
+            
             if response['op'] == "GUESS":
 
                 result = response['result']
